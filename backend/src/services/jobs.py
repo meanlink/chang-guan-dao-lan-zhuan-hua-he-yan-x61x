@@ -4,8 +4,15 @@ from redis import Redis
 from src.config.settings import REDIS_URL
 from src.models import Dataset, Job
 from src.services.business import metadata
+from src.services.holdout import sealed_keys
 def create(db, data, user):
     if not db.get(Dataset,data.dataset_id): raise HTTPException(404,'数据批次不存在')
+    dataset=db.get(Dataset,data.dataset_id)
+    # 同号记录不能同时入探索批和确认批：含留样键的数据批次禁止再做探索分析
+    blocked=sealed_keys(db,dataset.id)
+    if blocked:
+        leaked=[str(r.get('record')) for r in dataset.records if str(r.get('record')) in blocked][:5]
+        if leaked:raise HTTPException(409,'该批次含已封存确认批同号记录，探索分析拒绝使用：'+'、'.join(leaked))
     allowed={p['key']:p for p in metadata().get('parameters',[])}
     if set(data.params)-set(allowed): raise HTTPException(422,'包含未知分析参数')
     params={k:p['default'] for k,p in allowed.items()}
